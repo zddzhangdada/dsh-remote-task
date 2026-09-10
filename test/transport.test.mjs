@@ -63,16 +63,26 @@ test("a peer that does not acknowledge is bounded by the configured timeout", as
 
 test("Weave owns the reachable workspace session catalog and hides archived entries", async () => {
   const active = { id: "active-session", header: { id: "active-session", createdAt: 20 } };
+  const cold = { id: "cold-session", header: { id: "cold-session", createdAt: 15 } };
   const archived = { id: "archived-session", header: { id: "archived-session", createdAt: 10 } };
   const receiver = new DshWeaveTransport({
     agents: { list() { return [{ id: "active-session", status: "idle", session: active }]; } },
     sessions: { list() { return [active]; } },
     sessionTitle: { get(session) { return { title: session.id === "active-session" ? "Active build" : session.id }; } },
-    sessionPersistence: { async list() { return [active.header, archived.header]; } },
+    sessionPersistence: {
+      async list() { return [active, cold, archived].map((session) => ({ header: session.header, revision: `revision-${session.id}` })); },
+      async open(id, access) {
+        assert.equal(id, "cold-session"); assert.equal(access, "read");
+        return {
+          async read() { return { eventState: "shared", events: [{ type: "session/title", data: { title: "Cold build" }, time: 30 }] }; },
+          async close() {}
+        };
+      }
+    },
     workspaceRegistry: {
       archivedSessionIds: ["archived-session"],
       list() { return [
-        { id: "workspace-live", title: "Release", sessionIds: ["active-session", "archived-session"] },
+        { id: "workspace-live", title: "Release", sessionIds: ["active-session", "cold-session", "archived-session"] },
         { id: "workspace-archived", title: "Old", archived: true, sessionIds: ["active-session"] }
       ]; }
     }
@@ -84,7 +94,10 @@ test("Weave owns the reachable workspace session catalog and hides archived entr
     const catalogs = await sender.remoteSessions();
     assert.equal(catalogs.length, 1); assert.equal(catalogs[0].hostName, "studio-mini");
     assert.equal(catalogs[0].state, "online");
-    assert.deepEqual(catalogs[0].workspaces, [{ id: "workspace-live", title: "Release", sessions: [{ id: "active-session", title: "Active build", state: "idle", running: true, updatedAt: 20 }] }]);
+    assert.deepEqual(catalogs[0].workspaces, [{ id: "workspace-live", title: "Release", sessions: [
+      { id: "active-session", title: "Active build", state: "idle", running: true, updatedAt: 20 },
+      { id: "cold-session", title: "Cold build", state: "offline", running: false, updatedAt: 30 }
+    ] }]);
   } finally { await Promise.all([sender.close(), receiver.close()]); }
 });
 
