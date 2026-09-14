@@ -4,7 +4,7 @@
 
 Group bilingual pairing and host settings; cancel disconnected or stopped requests; preserve reachable-host state; obtain optional Bridge through the public service lookup.
 
-Source: [`v0.1.0-rc.16`](https://github.com/baixianger/dsh-weave/tree/v0.1.0-rc.16). Distribution: `latest`.
+Source: [`f5b00a425890c9393a53df0a4e1511659ab32f24`](https://github.com/baixianger/dsh-weave/commit/f5b00a425890c9393a53df0a4e1511659ab32f24) · [`v0.1.0-rc.16`](https://github.com/baixianger/dsh-weave/tree/v0.1.0-rc.16). Distribution: `latest`.
 
 Release tags point at the exact source commit used to build the package. The bookkeeping commit that fills in a source SHA intentionally comes after that tag.
 
