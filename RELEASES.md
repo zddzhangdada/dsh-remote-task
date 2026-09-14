@@ -1,5 +1,11 @@
 # Releases
 
+## 0.1.0-rc.16 · 2026-09-14
+
+Group bilingual pairing and host settings; cancel disconnected or stopped requests; preserve reachable-host state; obtain optional Bridge through the public service lookup.
+
+Source: [`v0.1.0-rc.16`](https://github.com/baixianger/dsh-weave/tree/v0.1.0-rc.16). Distribution: `latest`.
+
 Release tags point at the exact source commit used to build the package. The bookkeeping commit that fills in a source SHA intentionally comes after that tag.
 
 | Version | Tag | Source commit | Summary |

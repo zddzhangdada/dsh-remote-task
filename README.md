@@ -1,124 +1,85 @@
+<div align="center">
+
+<img src="docs/assets/hero.svg" alt="DSH Weave" width="100%" />
+
 # DSH Weave
 
-[English](README.md) | [简体中文](README.zh.md)
+[English](README.md) · [简体中文](README.zh.md)
 
-> A private, peer-to-peer fabric for connecting DeepSeek Harness nodes across machines.
+[![npm](https://img.shields.io/npm/v/dsh-weave?style=flat-square&color=374151)](https://www.npmjs.com/package/dsh-weave) [![License: MIT](https://img.shields.io/badge/License-MIT-374151?style=flat-square)](LICENSE) [![DSH plugin](https://img.shields.io/badge/DSH-plugin-374151?style=flat-square)](https://github.com/topics/dsh-plugin)
 
-**DSH Weave** turns a collection of local DSH installations into an intentional network: nodes can discover trusted peers, exchange session-aware events, hand off work, and recover after a connection drops — without placing a central server in the execution path.
+</div>
 
-| Status | Transport | Scope |
-| --- | --- | --- |
-| Transport MVP | Iroh + QUIC | Explicitly trusted DSH nodes |
+Connect explicitly trusted DeepSeek Harness hosts through Iroh. Keep pairing, peer identity, reachability, and the remote session directory in one transport layer.
 
-## What it gives you
+## What you get
 
-- Persistent local node identity and explicit peer trust.
-- Encrypted QUIC connectivity with direct paths and relay fallback through Iroh.
-- A remote Host, workspace, and session directory for higher-level plugins.
-- Separate reachability and agent-presence states, so offline is not mistaken for idle.
-- A DSH Settings page for ticket exchange, relay status, and trusted peers.
-
-## Product boundary
-
-`dsh-bridge` is the local contract: it connects sessions in one DSH host.
-`dsh-weave` carries approved messages between those hosts. `dsh-chat` is the
-optional Web group-chat surface above both layers.
-
-```text
-DSH node A ── dsh-bridge ── dsh-weave ── Iroh ── Iroh ── dsh-weave ── dsh-bridge ── DSH node B
-```
-
-Iroh supplies authenticated, encrypted QUIC connections, direct peer-to-peer paths where possible, and relay fallback where required. Weave owns DSH host identity, host trust, endpoint refresh, reachability, the workspace/session directory, and authenticated request delivery. Higher-level plugins own their domain membership and capabilities; for example, Chat owns rooms and room capabilities.
-
-The remote directory reports agent state as `idle`, `running`, or `offline`.
-Host reachability is tracked separately as `unknown`, `connecting`, `online`,
-or `offline`; waking a persisted session remains a `dsh-bridge` responsibility.
+| Capability | Behavior |
+| --- | --- |
+| **Persistent identity** | The same host identity survives restarts. |
+| **Explicit pairing** | Exchange endpoint tickets and trust each peer locally. |
+| **Encrypted transport** | Iroh provides QUIC connections, direct paths, and relay fallback. |
+| **Remote directory** | Discover workspaces and sessions on paired hosts. |
+| **Visible state** | Host reachability is separate from agent idle/running/offline state. |
+| **Native settings** | Grouped identity and pairing controls, copy feedback, and removal confirmation. |
 
 ## Quick start
 
-The transport MVP provides an Iroh endpoint, ticket exchange, explicit peer
-trust, and a message frame that is handed to `dsh-bridge` when both plugins
-run in the same host. It deliberately does not auto-trust a peer that merely
-knows an endpoint address.
+On each host:
 
 ```bash
-dsh plugin --profile web add dsh-weave@next
+dsh plugin --profile web add dsh-weave@latest
 dsh web
 ```
 
-Open **Settings → Weave** on both Hosts, copy each node's ticket to the other
-Host, and explicitly trust it. Knowing an endpoint ticket does not grant trust
-until the receiving Host accepts it.
+1. Open **Settings → Weave** on both hosts.
+2. Exchange their tickets through a channel you trust.
+3. Add and explicitly trust the other host's ticket on each side.
+4. Use a higher-level plugin such as [DSH Chat](https://github.com/baixianger/dsh-chat) to select remote sessions.
 
-```js
-import {
-  DSH_WEAVE_ALPN,
-  DSH_WEAVE_PROTOCOL_VERSION,
-  DSH_WEAVE_STAGE,
-} from "dsh-weave";
+Add [DSH Bridge](https://github.com/baixianger/dsh-bridge) when messages should reach local agents on a receiving host. Bridge is optional for transport startup.
 
-console.log(DSH_WEAVE_ALPN);             // dsh-weave/1
-console.log(DSH_WEAVE_PROTOCOL_VERSION); // 1
-console.log(DSH_WEAVE_STAGE);            // design-preview
+## One transport, separate responsibilities
+
+```mermaid
+flowchart LR
+  A[Host A · Bridge] --> WA[Weave]
+  WA <-->|Iroh · QUIC| WB[Weave]
+  WB --> B[Host B · Bridge]
 ```
 
-## The first protocol
+Iroh owns encrypted connectivity. Weave owns host trust, endpoint refresh, reachability, and authenticated requests. Chat owns rooms, membership, and room capabilities. Knowing a ticket alone does not grant trust or agent access.
 
-| Plane | What it carries | Delivery rule |
+## Configuration
+
+| Field | Default | Purpose |
 | --- | --- | --- |
-| Control | invite, membership, heartbeat, capability updates | request/acknowledgement |
-| Task | offer, accept, progress, result, cancellation | idempotent at-least-once |
-| Session | user-approved context or trajectory references | explicit sharing only |
+| `hostName` | System hostname | Display label for the host. |
+| `relayMode` | `default` | Iroh default relay selection, or `disabled`. |
+| `persistIdentity` / `persistPeers` | `true` | Keep identity and trusted peers across restarts. |
+| `acknowledgementTimeoutMs` | `10000` | Default acknowledgement deadline. |
+| `maxConcurrentInbound` | `64` | Bound concurrent incoming requests. |
+| `shutdownTimeoutMs` | `1000` | Bound transport shutdown. |
 
-Every node has a persistent network identity. Joining a mesh requires an expiring invite and an explicit local approval. A transport connection alone never grants permission to execute a task.
+Identity and trusted peers are stored under `$DSH_HOME/dsh-weave` (`~/.dsh` by default), with owner-only permissions. `identityPath` and `peersPath` can override their locations.
 
-## Security posture
+## Cancellation & delivery
 
-- End-to-end encryption is supplied by Iroh's authenticated QUIC transport.
-- A mesh allowlist and capability grants sit above transport identity.
-- Remote work is denied by default until the receiving node approves it.
-- Secrets, provider credentials, and raw filesystem access never travel as ordinary session events.
-- A self-hosted relay/discovery deployment is the production path; public relays are for development only.
+Outbound requests accept a cancellation signal. Cancellation closes their connection; the receiving listener is also notified when the peer disconnects. Cancelling a request does not mark an otherwise reachable host offline. Chat's longer polling requests use matching acknowledgement deadlines.
 
-See [architecture](./docs/ARCHITECTURE.md), [wire protocol](./docs/PROTOCOL.md), and [security model](./docs/SECURITY.md).
+The current release is a **transport MVP**. It provides pairing, directory access, and authenticated request delivery. A general remote task approval workflow and durable transport outbox/reconnect replay are not implemented. Application-level persistence belongs to the consuming plugin.
 
-## Pairing and delivery
+## Protocol & architecture
 
-Exchange each node's ticket out of band, then explicitly trust it before
-sending. `dsh-weave` rejects a frame from an untrusted endpoint even though
-Iroh has already encrypted the connection. This separates transport identity
-from DSH authorization. The node's Iroh identity is persisted locally under
-`~/.dsh/dsh-weave/identity.json` with owner-only permissions, so a restart
-does not silently create a new peer identity. Explicitly trusted peer IDs and
-their last accepted endpoint tickets are also stored locally with owner-only
-permissions, so paired-host discovery survives a restart. An endpoint ticket
-also carries addressing hints; trust a fresh ticket again when a peer changes
-its reachable addresses.
-The trusted-host `/dsh-weave/ticket` RPC exposes that current ticket for
-pairing UIs.
+[Architecture](docs/ARCHITECTURE.md) · [Protocol](docs/PROTOCOL.md) · [Security](docs/SECURITY.md) · [Room authority](docs/ADR-001-authoritative-chat-rooms.md)
 
-The Web profile contributes a dedicated **Settings → Weave** page. It shows
-the current Iroh ticket and relay mode, accepts trusted peer tickets, and lists
-paired endpoint identities. Higher-level plugins such as `dsh-chat` consume
-the paired-host workspace/session catalog and send by stable host id. They
-never receive or persist peer endpoint tickets and do not own transport
-identity, pairing, or relay policy.
+The design documents include planned capabilities; use this README and the release notes for current behavior.
 
-## Roadmap
-
-- [x] Publish the v1 protocol contract
-- [x] `dsh-bridge` local event adapter
-- [x] Iroh endpoint adapter and ticket-based trust flow
-- [ ] Remote task request / approval / result streams
-- [ ] Durable outbox and reconnect replay
-- [ ] Self-hosted relay and discovery guidance
-
-## Development
+## Development & feedback
 
 ```bash
+npm ci
 npm run check
 ```
 
-## License
-
-MIT © Xiang Bai
+[Report an issue](https://github.com/baixianger/dsh-weave/issues) · [Release notes](RELEASES.md) · [MIT license](LICENSE)

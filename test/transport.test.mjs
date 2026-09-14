@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { DshWeaveTransport } from "../lib/index.js";
+import { DshWeaveTransport, apply, createWeaveHandler, handleWeaveRequest } from "../lib/index.js";
 
 test("trusted Iroh peers exchange a DSH Weave message", async () => {
-  const sender = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false });
-  const receiver = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false });
+  const sender = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
+  const receiver = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
   try {
     const senderTicket = await sender.ticket(); const receiverTicket = await receiver.ticket();
     await sender.trust(receiverTicket); await receiver.trust(senderTicket);
@@ -20,8 +20,8 @@ test("trusted Iroh peers exchange a DSH Weave message", async () => {
 
 test("a claimed Weave frame returns a protocol response without Bridge delivery", async () => {
   const bridgeCalls = [];
-  const sender = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false });
-  const receiver = new DshWeaveTransport({ dshBridge: { deliverExternal(...args) { bridgeCalls.push(args); } } }, { relayMode: "disabled", persistIdentity: false });
+  const sender = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
+  const receiver = new DshWeaveTransport({ get(name) { return name === "dshBridge" ? { deliverExternal(...args) { bridgeCalls.push(args); } } : undefined; }, get dshBridge() { throw new Error("cannot get property dshBridge without inject"); } }, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
   try {
     const senderTicket = await sender.ticket(); const receiverTicket = await receiver.ticket();
     await sender.trust(receiverTicket); await receiver.trust(senderTicket);
@@ -125,9 +125,9 @@ test("an unclaimed frame is rejected when Bridge is unavailable", async () => {
 
 test("a default Weave identity survives a transport restart", async () => {
   const identityPath = join(await mkdtemp(join(tmpdir(), "dsh-weave-")), "identity.json");
-  const first = new DshWeaveTransport(undefined, { relayMode: "disabled", identityPath });
+  const first = new DshWeaveTransport(undefined, { relayMode: "disabled", identityPath, persistPeers: false });
   const firstTicket = await first.ticket(); await first.close();
-  const second = new DshWeaveTransport(undefined, { relayMode: "disabled", identityPath });
+  const second = new DshWeaveTransport(undefined, { relayMode: "disabled", identityPath, persistPeers: false });
   try {
     const firstId = (await import("@number0/iroh")).EndpointTicket.fromString(firstTicket).endpointAddr().id().toString();
     const secondId = (await import("@number0/iroh")).EndpointTicket.fromString(await second.ticket()).endpointAddr().id().toString();
@@ -165,4 +165,193 @@ test("removing a trusted peer removes its saved routing ticket", async () => {
     try { await restarted.start(); assert.deepEqual(restarted.peers(), []); assert.deepEqual(restarted.endpoints(), []); }
     finally { await restarted.close(); }
   } finally { await receiver.close(); }
+});
+
+test("duplicate suppression keeps a bounded window of settled markers", async () => {
+  const sender = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
+  const receiver = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false, recentMessageLimit: 3 });
+  try {
+    const senderTicket = await sender.ticket(); const receiverTicket = await receiver.ticket();
+    await sender.trust(receiverTicket); await receiver.trust(senderTicket);
+    receiver.subscribe(() => ({ claimed: true, result: { accepted: true } }));
+    const request = (id) => ({ ticket: receiverTicket, from: "source", to: "room", text: id, id });
+    for (const id of ["bounded-1", "bounded-2", "bounded-3", "bounded-4", "bounded-5"]) await sender.send(request(id));
+    assert.equal(receiver.recentMessages.size, 3);
+    for (const entry of receiver.recentMessages.values()) {
+      assert.equal(typeof entry.then, "undefined");
+      assert.equal(typeof entry.settledAt, "number");
+    }
+    receiver.recentMessages.set("stale:marker", { result: undefined, settledAt: Date.now() - 10 * 60 * 1000 });
+    await sender.send(request("bounded-6"));
+    assert.equal(receiver.recentMessages.has("stale:marker"), false);
+    assert.equal((await sender.send(request("bounded-5"))).result.accepted, true);
+    assert.equal(receiver.recentMessages.size, 3);
+  } finally { await Promise.all([sender.close(), receiver.close()]); }
+});
+
+test("concurrent start and ticket calls bind a single endpoint", async () => {
+  let binds = 0;
+  const config = { persistIdentity: false, persistPeers: false };
+  // #start() reads relayMode exactly once per bind attempt.
+  Object.defineProperty(config, "relayMode", { get() { binds += 1; return "disabled"; } });
+  const transport = new DshWeaveTransport(undefined, config);
+  try {
+    const first = transport.start(); const second = transport.start(); const pendingTicket = transport.ticket();
+    assert.equal(first, second);
+    const [endpoint, sameEndpoint] = await Promise.all([first, second]);
+    assert.equal(endpoint, sameEndpoint);
+    assert.equal(binds, 1);
+    assert.equal(await transport.start(), endpoint);
+    assert.equal(await pendingTicket, await transport.ticket());
+    assert.equal(binds, 1);
+  } finally { await transport.close(); }
+});
+
+test("close aborts in-flight inbound work and clears per-peer state", async () => {
+  let dispatching; const started = new Promise((resolve) => { dispatching = resolve; });
+  let release; const blocked = new Promise((resolve) => { release = resolve; });
+  const sender = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false, acknowledgementTimeoutMs: 2_000 });
+  const receiver = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false, shutdownTimeoutMs: 200 });
+  try {
+    const senderTicket = await sender.ticket(); const receiverTicket = await receiver.ticket();
+    await sender.trust(receiverTicket); await receiver.trust(senderTicket);
+    receiver.subscribe(async () => { dispatching(); await blocked; return true; });
+    const acknowledgement = sender.send({ ticket: receiverTicket, from: "source", to: "room", text: "in flight" }).then(() => "delivered", (error) => error.message);
+    await started;
+    assert.equal(receiver.inbound.size, 1); assert.equal(receiver.recentMessages.size, 1); assert.equal(receiver.hostStates.size, 1);
+    await receiver.close();
+    assert.equal(receiver.inbound.size, 0); assert.equal(receiver.recentMessages.size, 0);
+    assert.equal(receiver.hostStates.size, 0); assert.equal(receiver.remoteSessionStates.size, 0);
+    release();
+    assert.notEqual(await acknowledgement, "delivered");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(receiver.recentMessages.size, 0);
+  } finally { await Promise.all([sender.close(), receiver.close()]); }
+});
+
+test("an invalid stored identity fails loud instead of creating a new peer identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dsh-weave-"));
+  const identityPath = join(directory, "identity.json");
+  const secretKey = [1, 2, 3];
+  await writeFile(identityPath, `${JSON.stringify({ version: 1, secretKey })}\n`, "utf8");
+  const transport = new DshWeaveTransport(undefined, { relayMode: "disabled", identityPath, peersPath: join(directory, "peers.json") });
+  try {
+    await assert.rejects(() => transport.start(), /is invalid: expected 32 secret-key bytes/);
+    assert.deepEqual(JSON.parse(await readFile(identityPath, "utf8")).secretKey, secretKey);
+  } finally { await transport.close(); }
+});
+
+test("the settings route is published on the Connection /api Fetch seam", async () => {
+  const calls = { injected: [], routes: [], disposed: [] };
+  const ctx = {
+    get: () => undefined,
+    provide() {},
+    effect(callback) { const dispose = callback(); calls.disposed.push(dispose); return dispose; },
+    inject(deps, callback) {
+      calls.injected.push([...deps]);
+      // Model the real contract: the callback reads only the services it
+      // declared, while the framework methods every ctx carries stay
+      // available.  Handing it an ambient `webCtx` is how the old
+      // per-plugin RPC channel stayed invisible to this test.
+      callback({
+        effect: (registration) => registration(),
+        ...Object.fromEntries(deps.map((name) => [name, name === "connection"
+          ? { fetch: { register(route) { calls.routes.push(route); return () => {}; } } }
+          : undefined]))
+      });
+    },
+    tools: { register() {} }
+  };
+
+  apply(ctx, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
+
+  assert.deepEqual(calls.injected, [["connection"]], "the seam is declared, never read as an ambient property");
+  // The card's transport is a Fetch route under `/api` — the single path this
+  // deployment mounts and fences — not a per-plugin RPC channel.
+  assert.deepEqual(calls.routes.map((route) => [route.path, route.methods, route.requestBody]), [
+    ["/api/dsh-weave", ["POST"], "buffered"]
+  ]);
+  for (const dispose of calls.disposed) await dispose?.();
+});
+
+test("the settings route answers an RPC envelope for every input", async () => {
+  const seen = [];
+  const handler = async (endpoint, payload) => {
+    seen.push({ endpoint, args: payload?.args });
+    if (endpoint === "boom") throw new Error("weave handler failed");
+    return { ok: true, value: { endpoint } };
+  };
+
+  const ok = await handleWeaveRequest(handler, { json: async () => ({ endpoint: "status", args: { a: 1 } }) });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("content-type"), "application/json");
+  assert.deepEqual(await ok.json(), { ok: true, value: { endpoint: "status" } });
+  assert.deepEqual(seen, [{ endpoint: "status", args: { a: 1 } }]);
+
+  // A body that is not JSON, one without an endpoint, and a throwing handler
+  // are all answered as envelopes: a throw here would surface in the browser as
+  // an opaque transport failure instead of a message a human can act on.
+  const notJson = await handleWeaveRequest(handler, { json: async () => { throw new Error("bad json"); } });
+  assert.equal(notJson.status, 200);
+  const notJsonEnvelope = await notJson.json();
+  assert.equal(notJsonEnvelope.ok, false);
+  assert.deepEqual(notJsonEnvelope.error.details, {});
+
+  const noEndpoint = await handleWeaveRequest(handler, { json: async () => ({ args: {} }) });
+  assert.equal(noEndpoint.status, 200);
+  const noEndpointEnvelope = await noEndpoint.json();
+  assert.equal(noEndpointEnvelope.ok, false);
+  assert.match(noEndpointEnvelope.error.message, /endpoint/);
+
+  const emptyEndpoint = await handleWeaveRequest(handler, { json: async () => ({ endpoint: "" }) });
+  assert.equal(emptyEndpoint.status, 200);
+  assert.equal((await emptyEndpoint.json()).ok, false);
+
+  const thrown = await handleWeaveRequest(handler, { json: async () => ({ endpoint: "boom" }) });
+  assert.equal(thrown.status, 200);
+  const thrownEnvelope = await thrown.json();
+  assert.equal(thrownEnvelope.ok, false);
+  assert.match(thrownEnvelope.error.message, /weave handler failed/);
+});
+
+test("the settings handler answers the same endpoints and values as before", async () => {
+  const trusted = [];
+  const weave = {
+    config: { relayMode: "disabled" },
+    async ticket() { return "ticket-value"; },
+    peers() { return ["peer-a"]; },
+    hosts() { return [{ hostId: "peer-a", addressKnown: true, state: "unknown" }]; },
+    async trust(ticket) { trusted.push(ticket); return "peer-b"; },
+    async untrust(peerId) { trusted.push(peerId); return true; }
+  };
+  const handler = createWeaveHandler(weave);
+
+  assert.deepEqual(await handler("ticket", {}), { ok: true, value: { ticket: "ticket-value" } });
+  assert.deepEqual(await handler("peers", {}), { ok: true, value: { peers: ["peer-a"] } });
+  assert.deepEqual(await handler("endpoints", {}), { ok: true, value: { endpoints: [{ hostId: "peer-a", addressKnown: true, state: "unknown" }] } });
+  assert.deepEqual(await handler("status", {}), { ok: true, value: { relayMode: "disabled", peerCount: 1 } });
+  assert.deepEqual(await handler("trust", { args: { ticket: "other" } }), { ok: true, value: { peerId: "peer-b" } });
+  assert.deepEqual(await handler("untrust", { args: { peerId: "peer-b" } }), { ok: true, value: { removed: true } });
+  assert.deepEqual(trusted, ["other", "peer-b"]);
+  // An unknown endpoint propagates for the route's envelope to turn into an
+  // error result; the route is the only layer that must never throw.
+  await assert.rejects(() => handler("nope", {}), /unknown dsh-weave endpoint: nope/);
+});
+
+test("cancelling an outbound Iroh request closes the peer's pending handler", { timeout: 5_000 }, async () => {
+  const sender = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
+  const receiver = new DshWeaveTransport(undefined, { relayMode: "disabled", persistIdentity: false, persistPeers: false });
+  const entered = Promise.withResolvers(); const stopped = Promise.withResolvers();
+  try {
+    const a = await sender.ticket(); const b = await receiver.ticket();
+    await sender.trust(b); await receiver.trust(a);
+    receiver.subscribe((_frame, { signal }) => { entered.resolve(); signal.addEventListener("abort", () => stopped.resolve(), { once: true }); return stopped.promise.then(() => true); });
+    const controller = new AbortController();
+    const pending = sender.sendTo({ hostId: sender.identify(b), from: "test", to: "wait", text: "read", signal: controller.signal });
+    await entered.promise;
+    controller.abort(new Error("cancel remote read"));
+    await assert.rejects(pending, /cancel remote read/);
+    await stopped.promise;
+    assert.notEqual(sender.hosts()[0].state, "offline", "cancellation is not evidence that a peer is offline");
+  } finally { await Promise.all([sender.close(), receiver.close()]); }
 });
