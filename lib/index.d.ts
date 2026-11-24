@@ -5,7 +5,7 @@ export declare const DSH_WEAVE_STAGE: "transport-mvp";
 
 /** The first public protocol revision. */
 export declare const DSH_WEAVE_PROTOCOL_VERSION: 1;
-export declare const name = "dsh-weave";
+export declare const name = "dsh-remote-task";
 export declare const inject: readonly ["connection", "tools", "agents", "sessions", "sessionTitle", "sessionPersistence", "workspaceRegistry", "typert"];
 export type DshWeaveHostState = "unknown" | "connecting" | "online" | "offline" | "unpaired";
 export type DshWeaveSessionState = "idle" | "running" | "offline" | "host-offline" | "unknown";

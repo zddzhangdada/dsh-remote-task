@@ -1,8 +1,8 @@
-# DSH Weave architecture
+# DSH Remote Task architecture
 
 ## Goal
 
-DSH Weave connects trusted DeepSeek Harness nodes across hosts while preserving a local-first execution model. It is not a shared shell, a credential synchronizer, or an unauthenticated agent swarm.
+DSH Remote Task connects trusted DeepSeek Harness nodes across hosts and sends tasks to sessions on another machine while preserving a local-first execution model. It is not a shared shell, a credential synchronizer, or an unauthenticated agent swarm.
 
 ## Layers
 
@@ -10,7 +10,7 @@ DSH Weave connects trusted DeepSeek Harness nodes across hosts while preserving 
 DSH plugin surface
   ├─ dsh-bridge: same-host session delivery
   ├─ dsh-chat: rooms, room membership, room capabilities, chat outbox
-  └─ dsh-weave: host identity, host trust, host/session directory, routing
+  └─ dsh-remote-task: host identity, host trust, host/session directory, routing
        └─ Iroh adapter: Endpoint, discovery, QUIC streams, relay fallback
 ```
 

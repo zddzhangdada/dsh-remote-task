@@ -1,4 +1,4 @@
-# DSH Weave security model
+# DSH Remote Task security model
 
 ## Trust boundaries
 

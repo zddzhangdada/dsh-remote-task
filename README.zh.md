@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="DSH Weave" width="100%" />
+<img src="docs/assets/hero.svg" alt="DSH Remote Task" width="100%" />
 
-# DSH Weave
+# DSH Remote Task
 
 [English](README.md) · [简体中文](README.zh.md)
 
@@ -10,7 +10,7 @@
 
 </div>
 
-通过 Iroh 连接明确受信任的 DeepSeek Harness 主机。由一个传输层统一处理配对、身份、可达状态和远程会话目录。
+通过 Iroh 连接明确受信任的 DeepSeek Harness 主机，把任务发到另一台机器的会话，并在右侧面板跟进进度。配对一次即可。
 
 ## 主要能力
 
@@ -43,7 +43,8 @@
 在每台主机执行：
 
 ```bash
-dsh plugin --profile web add dsh-weave@latest
+# 从 Releases 下载 dsh-remote-task.tgz，然后：
+dsh plugin --profile web add ./dsh-remote-task.tgz
 dsh web
 ```
 
@@ -58,12 +59,12 @@ dsh web
 
 ```mermaid
 flowchart LR
-  A[主机 A · Bridge] --> WA[Weave]
-  WA <-->|Iroh · QUIC| WB[Weave]
+  A[主机 A · Bridge] --> WA[远程任务]
+  WA <-->|Iroh · QUIC| WB[远程任务]
   WB --> B[主机 B · Bridge]
 ```
 
-Iroh 负责加密连接；Weave 负责主机信任、endpoint 刷新、可达状态和认证请求；Chat 负责房间、成员和房间权限。仅知道 ticket 不代表获得信任或 Agent 访问权限。
+Iroh 负责加密连接；传输层（原 Weave）负责主机信任、endpoint 刷新、可达状态和认证请求；Chat 负责房间、成员和房间权限。仅知道 ticket 不代表获得信任或 Agent 访问权限。
 
 ## 配置
 
@@ -76,7 +77,7 @@ Iroh 负责加密连接；Weave 负责主机信任、endpoint 刷新、可达状
 | `maxConcurrentInbound` | `64` | 入站请求并发上限。 |
 | `shutdownTimeoutMs` | `1000` | 传输层关闭等待上限。 |
 
-身份和信任记录保存在 `$DSH_HOME/dsh-weave`，默认位于 `~/.dsh`，仅所有者可访问。可以通过 `identityPath`、`peersPath` 指定位置。
+身份和信任记录保存在 `$DSH_HOME/dsh-weave`，默认位于 `~/.dsh`，仅所有者可访问。这个目录沿用 dsh-weave，改名后原有配对不会丢。可以通过 `identityPath`、`peersPath` 指定位置。
 
 ## 取消与投递
 
@@ -97,8 +98,8 @@ npm ci
 npm run check
 ```
 
-[提交问题](https://github.com/zddzhangdada/dsh-weave/issues) · [版本记录](RELEASES.md) · [MIT 许可证](LICENSE)
+[提交问题](https://github.com/zddzhangdada/dsh-remote-task/issues) · [版本记录](RELEASES.md) · [MIT 许可证](LICENSE)
 
 ---
 
-**维护说明：** 本仓库承接 dsh-weave 0.3.6 及之后的版本。最早的 0.1.x 由 [Xiang Bai](https://github.com/baixianger) 创建；本仓库从 `0.1.0-rc.16` 继续，包含 0.2.0–0.3.6 的改动。旧的[原仓库](https://github.com/baixianger/dsh-weave)仍可查阅。
+**基于 dsh-weave：** 本项目基于 [dsh-weave](https://github.com/baixianger/dsh-weave)，最早由 [Xiang Bai](https://github.com/baixianger) 创建。从 0.3.7 起改名为 `dsh-remote-task`，名字更直接地说明实际功能：把任务发到另一台 DSH 主机的会话并读回进度。原仓库仍可查阅。

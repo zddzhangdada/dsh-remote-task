@@ -1,7 +1,7 @@
 {
-  "name": "dsh-weave",
-  "version": "0.3.6",
-  "description": "远程设备连接与任务：Weave 配对、给其他设备派任务、看进度与会话记录",
+  "name": "dsh-remote-task",
+  "version": "0.3.7",
+  "description": "远程任务：把任务发到另一台 DSH 的会话并读回进度（基于 dsh-weave 的 Iroh 通道）",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -56,7 +56,8 @@
     "iroh",
     "p2p",
     "quic",
-    "dsh-plugin"
+    "dsh-plugin",
+    "dsh-weave"
   ],
   "author": "Xiang Bai",
   "contributors": [
@@ -68,12 +69,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zddzhangdada/dsh-weave.git"
+    "url": "git+https://github.com/zddzhangdada/dsh-remote-task.git"
   },
   "bugs": {
-    "url": "https://github.com/zddzhangdada/dsh-weave/issues"
+    "url": "https://github.com/zddzhangdada/dsh-remote-task/issues"
   },
-  "homepage": "https://github.com/zddzhangdada/dsh-weave#readme",
+  "homepage": "https://github.com/zddzhangdada/dsh-remote-task#readme",
   "engines": {
     "node": ">=22"
   },

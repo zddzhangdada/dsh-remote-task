@@ -1,5 +1,7 @@
 # DSH Weave wire protocol v1
 
+> The wire protocol below is unchanged from dsh-weave for compatibility. The plugin package was renamed to `dsh-remote-task` in 0.3.7.
+
 ## Authoritative room extension
 
 `dsh-chat/2` is carried in a normal Weave frame with target `dsh-chat/2`.

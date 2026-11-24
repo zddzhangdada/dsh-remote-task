@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="DSH Weave" width="100%" />
+<img src="docs/assets/hero.svg" alt="DSH Remote Task" width="100%" />
 
-# DSH Weave
+# DSH Remote Task
 
 [English](README.md) · [简体中文](README.zh.md)
 
@@ -10,7 +10,7 @@
 
 </div>
 
-Connect explicitly trusted DeepSeek Harness hosts through Iroh. Keep pairing, peer identity, reachability, and the remote session directory in one transport layer.
+Connect explicitly trusted DeepSeek Harness hosts through Iroh and send tasks to sessions on another machine. Pair once, then dispatch a task from the current session and follow its progress in the right-side panel.
 
 ## What you get
 
@@ -41,7 +41,8 @@ Task records live in the session directory as `weave-tasks.json`, so deleting a 
 On each host:
 
 ```bash
-dsh plugin --profile web add dsh-weave@latest
+# Install dsh-remote-task.tgz from the Releases page, then:
+dsh plugin --profile web add ./dsh-remote-task.tgz
 dsh web
 ```
 
@@ -56,12 +57,12 @@ Add [DSH Bridge](https://github.com/baixianger/dsh-bridge) when messages should 
 
 ```mermaid
 flowchart LR
-  A[Host A · Bridge] --> WA[Weave]
-  WA <-->|Iroh · QUIC| WB[Weave]
+  A[Host A · Bridge] --> WA[Remote Task]
+  WA <-->|Iroh · QUIC| WB[Remote Task]
   WB --> B[Host B · Bridge]
 ```
 
-Iroh owns encrypted connectivity. Weave owns host trust, endpoint refresh, reachability, and authenticated requests. Chat owns rooms, membership, and room capabilities. Knowing a ticket alone does not grant trust or agent access.
+Iroh owns encrypted connectivity. The transport layer (originally Weave) owns host trust, endpoint refresh, reachability, and authenticated requests. Chat owns rooms, membership, and room capabilities. Knowing a ticket alone does not grant trust or agent access.
 
 ## Configuration
 
@@ -74,7 +75,7 @@ Iroh owns encrypted connectivity. Weave owns host trust, endpoint refresh, reach
 | `maxConcurrentInbound` | `64` | Bound concurrent incoming requests. |
 | `shutdownTimeoutMs` | `1000` | Bound transport shutdown. |
 
-Identity and trusted peers are stored under `$DSH_HOME/dsh-weave` (`~/.dsh` by default), with owner-only permissions. `identityPath` and `peersPath` can override their locations.
+Identity and trusted peers are stored under `$DSH_HOME/dsh-weave` (`~/.dsh` by default), with owner-only permissions — the path is kept from dsh-weave so existing pairings survive the rename. `identityPath` and `peersPath` can override their locations.
 
 ## Cancellation & delivery
 
@@ -95,8 +96,8 @@ npm ci
 npm run check
 ```
 
-[Report an issue](https://github.com/zddzhangdada/dsh-weave/issues) · [Release notes](RELEASES.md) · [MIT license](LICENSE)
+[Report an issue](https://github.com/zddzhangdada/dsh-remote-task/issues) · [Release notes](RELEASES.md) · [MIT license](LICENSE)
 
 ---
 
-**Maintenance:** this repository hosts dsh-weave 0.3.6 and later. The original 0.1.x line was created by [Xiang Bai](https://github.com/baixianger); this repository continues from `0.1.0-rc.16` and includes the 0.2.0–0.3.6 changes. The [older repository](https://github.com/baixianger/dsh-weave) remains available for reference.
+**Based on dsh-weave:** this project is based on [dsh-weave](https://github.com/baixianger/dsh-weave), originally created by [Xiang Bai](https://github.com/baixianger). Starting with 0.3.7 the package is named `dsh-remote-task` to reflect its actual function: sending tasks to sessions on another DSH host and reading their progress back. The original repository remains available for reference.
